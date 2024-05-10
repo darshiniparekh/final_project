@@ -1,0 +1,168 @@
+---
+title: "668 final project"
+author: "Darshini Parekh"
+date: "2024-05-10"
+output: html_document
+---
+```{r}
+library(dplyr)  
+library(ggplot2)
+library(tidyr)   
+library(lme4)    
+library(vegan)
+library(phyloseq)
+```
+
+#data prepration 
+```{r}
+#load the data
+data=read.csv("668.csv",header = T)
+str(data)
+
+
+
+data <- data %>%
+  mutate(across(where(is.character), ~replace(., . == "Unspecified", NA))) %>%
+  mutate(across(where(is.numeric), ~replace(., is.na(.), mean(., na.rm = TRUE))))
+
+# Converted factors to appropriate data types
+data$age_years <- as.numeric(as.character(data$age_years))
+data$bmi <- as.numeric(as.character(data$bmi))
+
+# Created categories based on numeric data
+data <- data %>%
+  mutate(age_group = cut(age_years, breaks = c(0, 18, 35, 50, 65, 100),
+                         labels = c("0-18", "19-35", "36-50", "51-65", "65+")))
+# Summary statistics 
+summary(data$age_years)
+
+
+```
+
+#checking normality
+```{r }
+# Histogram of age to check normalization of data 
+ggplot(data, aes(x = age_years)) +
+  geom_histogram(bins = 10, fill = "blue", color = "black") +
+  labs(title = "Distribution of Age", x = "Age (years)", y = "Frequency")
+
+# Bar plot for a categorical variable alcohol_consumption
+ggplot(data, aes(x = alcohol_consumption)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Alcohol Consumption Frequency", x = "Alcohol Consumption", y = "Count")
+
+
+#Q-Q plot for body mass index 
+ggplot(data, aes(sample = bmi)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = "Q-Q Plot for BMI") +
+  theme_minimal()
+
+```
+#t test 
+```{r}
+# T-test for age between two alcohol consumption groups
+t_test_result <- t.test(age_years ~ alcohol_consumption, data = data)
+print(t_test_result)
+
+# Extracted the p-value from the t-test
+p_value <- t_test_result$p.value
+
+# Created a box plot 
+ggplot(data, aes(x = alcohol_consumption, y = age_years, fill = alcohol_consumption)) +
+  geom_boxplot() +
+  labs(title = "Comparison of Age by Alcohol Consumption", x = "Alcohol Consumption", y = "Age (years)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_text(aes(x = 1.5, y = max(data$age_years, na.rm = TRUE), label = sprintf("p-value: %.3f", p_value)), vjust = -0.5) 
+
+```
+#correlation test 
+```{r}
+# Correlation between age and BMI
+correlation_result <- cor.test(data$age_years, data$bmi, method = "pearson")
+print(correlation_result)
+# Scatter plot with regression line
+ggplot(data, aes(x = age_years, y = bmi)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Age vs BMI", x = "Age (Years)", y = "BMI")
+
+```
+#anova test 
+```{r}
+# ANOVA for BMI across multiple age groups
+anova_result <- aov(bmi ~ age_group, data = data)
+summary(anova_result)
+
+# Extract p-value from the ANOVA summary
+p_value <- summary(anova_result)[[1]]$"Pr(>F)"[1]
+
+# Added the ANOVA result to the ggplot
+ggplot(data, aes(x = age_group, y = bmi, fill = age_group)) +
+  geom_point() +
+  labs(title = sprintf("BMI Distribution Across Age Groups (p-value: %.3f)", p_value),
+       x = "Age Group", y = "BMI") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_text(x = 1, y = max(data$bmi, na.rm = TRUE), label = sprintf("p-value = %.3f", p_value), vjust = -1.5, hjust = -0.1)
+
+
+```
+#pcoa 
+
+```{r}
+
+otu_table <- matrix(sample(1:1000, 200, replace = TRUE), nrow = 20, ncol = 10)
+rownames(otu_table) <- paste("Sample", 1:20)
+colnames(otu_table) <- paste("Species", 1:10)
+
+
+
+otu_ps <- otu_table(otu_table, taxa_are_rows = FALSE)
+sample_metadata <- data.frame(SampleID = rownames(otu_table), Group = sample(c("A", "B"), 20, replace = TRUE))
+row.names(sample_metadata) <- sample_metadata$SampleID
+
+sam_data <- sample_data(sample_metadata)
+ps <- phyloseq(otu_ps, sam_data)
+
+print(ps)
+
+
+# Converted OTU table from phyloseq to a matrix for vegan
+otu_matrix <- as.matrix(otu_table(ps))
+
+# Calculated Bray-Curtis distance using vegan
+distance_matrix <- vegdist(otu_matrix, method = "bray")
+
+# Checked the distance matrix
+print(distance_matrix)
+# Performed PCoA using vegan
+pcoa_results <- cmdscale(distance_matrix, eig = TRUE, k = 2)  
+summary(pcoa_results)
+
+# Converted the 'points' matrix to a data frame for easier handling
+pcoa_data <- as.data.frame(pcoa_results$points)
+
+# Assigned names to the columns based on the number of dimensions 
+names(pcoa_data) <- c("PC1", "PC2")  
+
+# Added group information for plotting
+pcoa_data$Group <- sample_metadata$Group
+
+#added row names back 
+rownames(pcoa_data) <- rownames(sample_metadata)
+
+# Checked the prepared data frame
+head(pcoa_data)
+
+
+ggplot(pcoa_data, aes(x = PC1, y = PC2, color = Group)) +
+    geom_point(size = 5) +  # Adjust size as needed
+    labs(title = "PCoA of Microbiome Samples",
+         x = "Principal Coordinate 1", y = "Principal Coordinate 2") +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1")  
+
+```
